@@ -1,8 +1,38 @@
+#include <cstdlib>
+#include <cstdint>
+#include <cerrno>
+
 #include "nnpack.h"
 
 #include "caffe/layers/nnpack_convolution_layer.hpp"
 
 namespace caffe {
+
+template <typename Dtype>
+NNPackConvolutionLayer<Dtype>::NNPackConvolutionLayer(const LayerParameter& param) :
+  BaseConvolutionLayer<Dtype>(param)
+{
+  uint32_t threads = 0;
+  char* omp_num_threads = getenv("OMP_NUM_THREADS");
+  if (omp_num_threads != nullptr) {
+    errno = 0;
+    char* omp_num_threads_parsed = omp_num_threads;
+    const unsigned long long threads_parsed = strtoul(omp_num_threads, &omp_num_threads_parsed, 10);
+    if (*omp_num_threads_parsed != '\0') {
+      LOG(FATAL) << "OMP_NUM_THREADS is not a number";
+    } else if ((errno != 0) || (threads_parsed > UINT32_MAX)) {
+      LOG(FATAL) << "Invalid number of threads";
+    }
+    threads = uint32_t(threads_parsed);
+  }
+  threadpool = pthreadpool_create(threads);
+}
+
+template <typename Dtype>
+NNPackConvolutionLayer<Dtype>::~NNPackConvolutionLayer() {
+  pthreadpool_destroy(static_cast<pthreadpool_t>(threadpool));
+  threadpool = nullptr;
+}
 
 template <typename Dtype>
 void NNPackConvolutionLayer<Dtype>::compute_output_shape() {
@@ -33,7 +63,8 @@ enum nnp_operation_status caffe_nnp_forward_convolution(
     const Dtype input[],
     const Dtype kernel[],
     const Dtype bias[],
-    Dtype output[]);
+    Dtype output[],
+    pthreadpool_t threadpool);
 
 template <>
 enum nnp_operation_status caffe_nnp_forward_convolution<double>(
@@ -47,7 +78,8 @@ enum nnp_operation_status caffe_nnp_forward_convolution<double>(
     const double input[],
     const double kernel[],
     const double bias[],
-    double output[]) {
+    double output[],
+    pthreadpool_t threadpool) {
   return nnp_operation_status_unsupported_algorithm;
 }
 
@@ -63,7 +95,8 @@ enum nnp_operation_status caffe_nnp_forward_convolution<float>(
     const float input[],
     const float kernel[],
     const float bias[],
-    float output[]) {
+    float output[],
+    pthreadpool_t threadpool) {
   return nnp_forward_convolution(algorithm,
                                  minibatch_size,
                                  input_channels,
@@ -75,7 +108,7 @@ enum nnp_operation_status caffe_nnp_forward_convolution<float>(
                                  kernel,
                                  bias,
                                  output,
-                                 nullptr,
+                                 threadpool,
                                  nullptr);
 }
 
@@ -139,7 +172,8 @@ void NNPackConvolutionLayer<Dtype>::Forward_cpu(
                                              bottom[i]->cpu_data(),
                                              weight,
                                              bias,
-                                             top[i]->mutable_cpu_data());
+                                             top[i]->mutable_cpu_data(),
+                                             static_cast<pthreadpool_t>(threadpool));
     CHECK_EQ(nnp_operation_status_success, status);
   }
 }

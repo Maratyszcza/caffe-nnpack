@@ -16,6 +16,8 @@
 #include "caffe/layers/tanh_layer.hpp"
 #include "caffe/proto/caffe.pb.h"
 
+#include "caffe/layers/nnpack_convolution_layer.hpp"
+
 #ifdef USE_CUDNN
 #include "caffe/layers/cudnn_conv_layer.hpp"
 #include "caffe/layers/cudnn_lcn_layer.hpp"
@@ -57,6 +59,16 @@ shared_ptr<Layer<Dtype> > GetConvolutionLayer(
   }
   if (engine == ConvolutionParameter_Engine_CAFFE) {
     return shared_ptr<Layer<Dtype> >(new ConvolutionLayer<Dtype>(param));
+  } else if (engine == ConvolutionParameter_Engine_NNPACK) {
+    // If we're in CPU mode and on supported processor, we can use NNPACK.
+    // Otherwise, we can't fall-through (since we'll get an unknown
+    // layer, so just return the default ConvolutionLayer
+    if ((Caffe::mode() == Caffe::CPU) && 
+      (NNPackConvolutionLayer<Dtype>::is_supported())) {
+        return shared_ptr<Layer<Dtype>>(
+          new NNPackConvolutionLayer<Dtype>(param));
+    }
+    return shared_ptr<Layer<Dtype>>(new ConvolutionLayer<Dtype>(param));
 #ifdef USE_CUDNN
   } else if (engine == ConvolutionParameter_Engine_CUDNN) {
     if (use_dilation) {

@@ -147,6 +147,9 @@ void NNPackConvolutionLayer<Dtype>::Forward_cpu(
         .left = static_cast<size_t>(this->pad_.cpu_data()[1])};
     auto algorithm = nnp_convolution_algorithm_wt8x8;
     switch (this->layer_param_.nnpack_convolution_param().algorithm()) {
+      case NNPACKConvolutionParameter_Algorithm_AUTO:
+        algorithm = nnp_convolution_algorithm_auto;
+        break;
       case NNPACKConvolutionParameter_Algorithm_WINOGRAD: {
         algorithm = nnp_convolution_algorithm_wt8x8;
         break;

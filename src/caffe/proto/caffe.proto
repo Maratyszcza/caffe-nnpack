@@ -1373,9 +1373,10 @@ message PReLUParameter {
 
 message NNPACKConvolutionParameter {
   enum Algorithm {
-    WINOGRAD = 0;
-    FFT_16x16 = 1;
-    FFT_8x8 = 2;
+    AUTO = 0;
+    WINOGRAD = 1;
+    FFT_16x16 = 2;
+    FFT_8x8 = 3;
   }
-  optional Algorithm algorithm = 1 [default=FFT_16x16];
+  optional Algorithm algorithm = 1 [default=AUTO];
 }

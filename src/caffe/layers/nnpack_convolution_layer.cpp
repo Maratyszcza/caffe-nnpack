@@ -52,14 +52,14 @@ void NNPackConvolutionLayer<Dtype>::compute_output_shape() {
 }
 
 template <typename Dtype>
-enum nnp_operation_status caffe_nnp_forward_convolution(
-    enum nnp_convolution_algorithm algorithm,
-    size_t minibatch_size,
+nnp_status caffe_nnp_convolution_output(
+    nnp_convolution_algorithm algorithm,
+    size_t batch_size,
     size_t input_channels,
     size_t output_channels,
-    struct nnp_size input_size,
-    struct nnp_size kernel_size,
-    struct nnp_padding padding,
+    nnp_size input_size,
+    nnp_padding input_padding,
+    nnp_size kernel_size,
     const Dtype input[],
     const Dtype kernel[],
     const Dtype bias[],
@@ -67,55 +67,49 @@ enum nnp_operation_status caffe_nnp_forward_convolution(
     pthreadpool_t threadpool);
 
 template <>
-enum nnp_operation_status caffe_nnp_forward_convolution<double>(
-    enum nnp_convolution_algorithm algorithm,
-    size_t minibatch_size,
+nnp_status caffe_nnp_convolution_output<double>(
+    nnp_convolution_algorithm algorithm,
+    size_t batch_size,
     size_t input_channels,
     size_t output_channels,
-    struct nnp_size input_size,
-    struct nnp_size kernel_size,
-    struct nnp_padding padding,
+    nnp_size input_size,
+    nnp_padding input_padding,
+    nnp_size kernel_size,
     const double input[],
     const double kernel[],
     const double bias[],
     double output[],
     pthreadpool_t threadpool) {
-  return nnp_operation_status_unsupported_algorithm;
+  return nnp_status_unsupported_algorithm;
 }
 
 template <>
-enum nnp_operation_status caffe_nnp_forward_convolution<float>(
-    enum nnp_convolution_algorithm algorithm,
-    size_t minibatch_size,
+nnp_status caffe_nnp_convolution_output<float>(
+    nnp_convolution_algorithm algorithm,
+    size_t batch_size,
     size_t input_channels,
     size_t output_channels,
-    struct nnp_size input_size,
-    struct nnp_size kernel_size,
-    struct nnp_padding padding,
+    nnp_size input_size,
+    nnp_padding input_padding,
+    nnp_size kernel_size,
     const float input[],
     const float kernel[],
     const float bias[],
     float output[],
     pthreadpool_t threadpool) {
-  return nnp_forward_convolution(algorithm,
-                                 minibatch_size,
-                                 input_channels,
-                                 output_channels,
-                                 input_size,
-                                 kernel_size,
-                                 padding,
-                                 input,
-                                 kernel,
-                                 bias,
-                                 output,
-                                 threadpool,
-                                 nullptr);
+  return nnp_convolution_output(algorithm,
+    batch_size, input_channels, output_channels,
+    input_size, input_padding,
+    kernel_size,
+    input, kernel, bias, output,
+    threadpool,
+    nullptr);
 }
 
 template <>
 bool NNPackConvolutionLayer<float>::is_supported() {
-  static enum nnp_operation_status nnpack_status = nnp_initialize();
-  return nnpack_status == nnp_operation_status_success;
+  static enum nnp_status nnpack_status = nnp_initialize();
+  return nnpack_status == nnp_status_success;
 }
 
 template <>
@@ -135,49 +129,44 @@ void NNPackConvolutionLayer<Dtype>::Forward_cpu(
     const size_t batch_size = bottom[i]->num();
     const size_t input_channels = bottom[i]->channels();
     const size_t output_channels = top[i]->channels();
-    const nnp_size input_size = {static_cast<size_t>(bottom[i]->width()),
-                                 static_cast<size_t>(bottom[i]->height())};
-    const nnp_size kernel_size = {
-        .width = static_cast<size_t>(this->blobs_[0]->width()),
-        .height = static_cast<size_t>(this->blobs_[0]->height())};
-    const nnp_padding padding = {
-        .top = static_cast<size_t>(this->pad_.cpu_data()[0]),
-        .right = static_cast<size_t>(this->pad_.cpu_data()[1]),
-        .bottom = static_cast<size_t>(this->pad_.cpu_data()[0]),
-        .left = static_cast<size_t>(this->pad_.cpu_data()[1])};
-    auto algorithm = nnp_convolution_algorithm_wt8x8;
+
+    nnp_size input_size;
+    input_size.width = static_cast<size_t>(bottom[i]->width());
+    input_size.height = static_cast<size_t>(bottom[i]->height());
+
+    nnp_padding input_padding;
+    input_padding.top = input_padding.bottom =
+      static_cast<size_t>(this->pad_.cpu_data()[0]);
+    input_padding.left = input_padding.right =
+      static_cast<size_t>(this->pad_.cpu_data()[1]);
+
+    nnp_size kernel_size;
+    kernel_size.width = static_cast<size_t>(this->blobs_[0]->width());
+    kernel_size.height = static_cast<size_t>(this->blobs_[0]->height());
+
+    auto algorithm = nnp_convolution_algorithm_auto;
     switch (this->layer_param_.nnpack_convolution_param().algorithm()) {
       case NNPACKConvolutionParameter_Algorithm_AUTO:
         algorithm = nnp_convolution_algorithm_auto;
         break;
-      case NNPACKConvolutionParameter_Algorithm_WINOGRAD: {
+      case NNPACKConvolutionParameter_Algorithm_WINOGRAD:
         algorithm = nnp_convolution_algorithm_wt8x8;
         break;
-      }
-      case NNPACKConvolutionParameter_Algorithm_FFT_16x16: {
+      case NNPACKConvolutionParameter_Algorithm_FFT_16x16:
         algorithm = nnp_convolution_algorithm_ft16x16;
         break;
-      }
-      case NNPACKConvolutionParameter_Algorithm_FFT_8x8: {
+      case NNPACKConvolutionParameter_Algorithm_FFT_8x8:
         algorithm = nnp_convolution_algorithm_ft8x8;
         break;
-      }
     }
 
-    const auto status =
-        caffe_nnp_forward_convolution<Dtype>(algorithm,
-                                             batch_size,
-                                             input_channels,
-                                             output_channels,
-                                             input_size,
-                                             kernel_size,
-                                             padding,
-                                             bottom[i]->cpu_data(),
-                                             weight,
-                                             bias,
-                                             top[i]->mutable_cpu_data(),
-                                             static_cast<pthreadpool_t>(threadpool));
-    CHECK_EQ(nnp_operation_status_success, status);
+    const nnp_status status = caffe_nnp_convolution_output<Dtype>(algorithm,
+      batch_size, input_channels, output_channels,
+      input_size, input_padding,
+      kernel_size,
+      bottom_data, weight, bias, top_data,
+      static_cast<pthreadpool_t>(threadpool));
+    CHECK_EQ(nnp_status_success, status);
   }
 }
 
